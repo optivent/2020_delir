@@ -100,8 +100,6 @@ import_ala <- import_ala %>% full_join(diff)
 import_ala <- import_ala %>% select(sort(tidyselect::peek_vars())) %>%
    select(number, everything())
 
-
-
 operativ <- list(
    import_demograph,
    import_operativ,
@@ -124,8 +122,18 @@ conservativ <- list(
    
 alldata <- rbind(operativ, conservativ)
 
+commondata <- list(
+   import_demograph,
+   import_himca,
+   import_lachs, 
+   import_phqbpi,
+   import_VEundMeds, 
+   import_ala) %>%
+   reduce(full_join)
 
+rm(list=ls(pattern="import"))
 
+explore <- corr_RF(commondata, iter = 200)
 
 
 
