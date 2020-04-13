@@ -40,43 +40,67 @@ impute_RF <- function(df) {
 }
 
 ####### random-forest-wrapper ######
-library(tidyverse)
-library(janitor)
-library(Boruta)
-library(furrr)
 
-scale01 <- function(x, ...){(x - min(x, ...)) / (max(x, ...) - min(x, ...))} # ... allows "na.rm = TRUE"
-
-corr_RF <- function(df, iter){
+corr_RF <- function(df, iter) {
   set.seed(111)
+  require(Boruta)
+  require(dplyr)
+  require(furrr)
+  
   plan(multiprocess)
-  suppressWarnings(
-    
-    result <- df %>% names() %>% 
-      future_map_dfr(
-        ~ attStats(
-          Boruta::Boruta(
-            formula(
-              paste0('`', ., '` ~ ', paste(names(df), collapse = " + "))
-            ),
-            data = df,
-            mcAdj = TRUE, doTrace = 0, holdHistory = TRUE, 
-            pValue = min(1/(ncol(df)*nrow(df)), 0.01),
-            maxRuns = iter
-          )
-        ) %>% 
-          rownames_to_column() %>% 
-          mutate(
-            Score = ifelse(decision == "Rejected", 0, 
-                           scale01(medianImp * normHits, na.rm = TRUE)),
-            Score = na_if(Score, 1)) %>%
-          dplyr::select(rowname, Score) %>% 
-          pivot_wider(names_from = rowname, values_from = Score),
-        .progress = TRUE
-      ) %>% mutate(target = colnames(df)) %>% column_to_rownames(var = "target") %>% 
-      na_if(0) 
-  )
-  return(result)
+  
+  df <- stats::na.omit(df) %>% as_tibble() 
+  df <- dplyr::mutate(df, calibration1 = 1:nrow(df), calibration2 = nrow(df):1)
+  df <- df %>% 
+    names() %>% 
+    future_map_dfr(
+      ~ attStats(
+        Boruta::Boruta(
+          formula(
+            paste0('`', ., '` ~ ', paste(names(df), collapse = " + "))
+          ),
+          data = df,
+          mcAdj = TRUE, doTrace = 0, holdHistory = TRUE, 
+          pValue = min(1/(nrow(df))^2 , 0.01),
+          maxRuns = iter
+        )
+      ) %>% 
+        rownames_to_column() %>% 
+        mutate(Score = ifelse(decision == "Rejected", 0, medianImp * normHits)) %>%
+        dplyr::select(rowname, Score) %>% 
+        pivot_wider(names_from = rowname, values_from = Score),
+      .progress = TRUE
+    ) %>%
+    as_tibble() %>% 
+    dplyr::mutate(target = colnames(df)) %>% 
+    pivot_longer(cols = -target, names_to = "feature") %>% 
+    dplyr::mutate(
+      value =  as.integer(100*value/max(value, na.rm = TRUE)), 
+      ident = case_when(
+        target == feature ~ "x",
+        target %in% c("calibration1","calibration2") ~ "x",
+        feature %in% c("calibration1","calibration2") ~ "x",
+        TRUE ~ "v"
+      )
+    ) %>%
+    dplyr::filter(ident == "v", value > 5) %>%
+    dplyr::select(-ident)
+  
+  return(df)
+}
+
+screen_targets <- function(df, frac) {
+  require(ggwordcloud)
+  set.seed(111)
+  
+  df %>%
+    group_by(target) %>% 
+    summarise_at(vars(value), list(median = median)) %>% 
+    dplyr::top_n(n() * frac) %>% 
+    ggplot(aes(label = target, size = median)) +
+    geom_text_wordcloud_area(area_corr_power = 1) +
+    scale_size_area(max_size = 14) +
+    theme_minimal()
 }
 
 
@@ -86,18 +110,50 @@ matrix_RF <- function(df, sensibility, clusters){
   ) %>% mutate(product = feature_wise*predictor_wise) %>% 
     top_frac(sensibility, product) %>% pull(name) -> selection
   
-  subset(df, rownames(df) %in% selection) %>% subset(select = selection) %>% 
+  df <- subset(df, rownames(df) %in% selection) %>% subset(select = selection) 
     pheatmap::pheatmap(display_numbers = TRUE, cutree_rows = clust, cutree_cols = clust)
 }
 
+####
+df <- results
+
+cutoff <- 20
+
+df <- df %>% as_tibble() %>% 
+  pivot_wider(id_cols = target, names_from = feature, values_from = value) %>% 
+  mutate_if(is.numeric, ~ ifelse(. < cutoff, NA, .)) %>% 
+  column_to_rownames(var = "target") %>% 
+  select(sort(tidyselect::peek_vars())) 
+
+selection <- intersect(
+  enframe(colMeans(df, na.rm = TRUE)) %>% na.omit() %>% pull(name), 
+  enframe(rowMeans(df, na.rm = TRUE)) %>% na.omit() %>% pull(name) 
+) 
+
+library(viridis)
+library(ggplot2)
+
+subset(df, rownames(df) %in% selection) %>% subset(select = selection) %>% 
+  rownames_to_column(var = "target") %>% 
+  pivot_longer(-target, names_to = "variable", values_to = "RFcorr") %>%
+  mutate(
+    target = factor(target, levels = rev(colnames(df))),
+    variable = factor(variable, levels = colnames(df)) 
+  ) %>% 
+  mutate_at(vars(RFcorr), ~ replace_na(.,0)) %>% 
+  ggplot(aes(variable, target, fill = RFcorr)) + 
+  geom_tile(aes(fill = RFcorr)) + 
+  geom_text(aes(label = round(RFcorr, 1)), na.rm=TRUE) +
+  scale_fill_viridis(name = "RF_imp") +
+  coord_equal()
+  
+
+###
 
 
 library(viridis)
-dff <- df %>% 
-  mutate(target = names(df)) %>% na_if(0) %>% 
-  pivot_longer(-target, names_to = "variable", values_to = "RFcorr") 
 
-ggplot(mutate(dff,
+ggplot(mutate(df,
               target = factor(target, levels = rev(colnames(dff))),
               variable = factor(variable, levels = colnames(dff))),
        aes(variable, target, fill = RFcorr %>% replace_na(0))) +
@@ -121,21 +177,22 @@ ggplot(na.omit(dff),
   theme(plot.title = element_text(hjust = 0.5), 
         text = element_text(size=16)) 
 
-dff %>% na.omit() %>% 
+dff %>% mutate(ident = (target == variable)) %>% 
+  filter(ident == FALSE) %>% select(-ident) %>% 
+  na.omit() %>% 
   mutate(bins = cut(RFcorr, breaks = seq(1, 0, by = -0.1))) %>% 
   count(bins) %>% 
-  rownames_to_column() %>% arrange(desc(rowname)) %>% rename(nr_of_RFcorr = n) %>% 
   mutate(
-    sensibility = 
-      paste0(round(cumsum(100*nr_of_RFcorr/nrow(na.omit(dff))),1), " %"),
-    bins = str_sub(bins, 2, -2)
+    bins = str_sub(bins, 2, -2) %>% 
+           str_replace_all(",", " - ") %>% 
+           str_replace_all("0 ", "0   ")
   ) %>% 
-  separate(bins, c("from_RF_imp", "to_RF_imp"), sep = ",") %>% 
-  dplyr::select(-rowname) %>% 
-  knitr::kable("html", align = "c") %>% 
-  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "central")) 
-
-
+  arrange(desc(bins)) %>% 
+  mutate(proc = 100*n/sum(n) %>% round(.,digits = 2)) %>% 
+  rename(feat_importance_range = bins, nr_of_correlations = n, procent = proc) %>% 
+  gt() %>% cols_align("center")
+  
+  
 input_procent_of_corr <- 50 # put a slider here :D 
 
 undirected <- rnd_forests %>% 

@@ -133,7 +133,41 @@ commondata <- list(
 
 rm(list=ls(pattern="import"))
 
-explore <- corr_RF(commondata, iter = 200)
+
+explore <- corr_RF(commondata, iter = 500)
+
+df <- explore
+
+df <- df %>% 
+   mutate(target = names(df)) %>% na_if(0) %>% 
+   pivot_longer(-target, names_to = "variable", values_to = "RFcorr") %>% 
+   mutate(ident = (target == variable)) %>% 
+   filter(ident == FALSE) %>% select(-ident) %>% 
+   na.omit() 
+
+df %>% mutate(bins = cut(RFcorr, breaks = seq(1, 0, by = -0.1))) %>% 
+   count(bins) %>% 
+   mutate(
+      bins = str_sub(bins, 2, -2) %>% str_replace_all(",", " - ") 
+   ) %>% 
+   arrange(desc(bins)) %>% 
+   mutate(proc = 100*n/sum(n)) %>% 
+   rename(feat_importance_range = bins, nr_of_correlations = n, procent = proc) %>% 
+   gt() %>% 
+      cols_align("center") %>% 
+      fmt_number(columns = vars(procent), decimals = 2)
+
+group_by(df, target) %>% summarise(sum_target = sum(RFcorr)) %>% rename(variable = target) %>% 
+   full_join(
+      group_by(df, variable) %>% summarise(sum_variable = sum(RFcorr)) 
+   ) %>% 
+   rowwise() %>% mutate(sum_RFimp  = sum(sum_target, sum_variable, na.rm = TRUE)) %>% ungroup() %>% 
+   select(-2,-3) %>% na.omit() %>% 
+   ggplot(aes(label = variable, size = sum_RFimp)) +
+   geom_text_wordcloud_area() +
+   scale_size_area(max_size = 8) +
+   theme_minimal()
+
 
 
 
