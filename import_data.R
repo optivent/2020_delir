@@ -95,10 +95,12 @@ ungroup() %>%
    select(number, name_diff, value_diff) %>% 
    pivot_wider(id_cols = number, names_from = name_diff, values_from = value_diff)
 
-
 import_ala <- import_ala %>% full_join(diff) 
 import_ala <- import_ala %>% select(sort(tidyselect::peek_vars())) %>%
    select(number, everything())
+rm(diff, import)
+
+
 
 operativ <- list(
    import_demograph,
@@ -120,8 +122,6 @@ conservativ <- list(
    import_ala) %>% reduce(full_join) %>% 
    filter(group == "VG")
    
-alldata <- rbind(operativ, conservativ)
-
 commondata <- list(
    import_demograph,
    import_himca,
@@ -131,45 +131,40 @@ commondata <- list(
    import_ala) %>%
    reduce(full_join)
 
+alldata <- rbind(operativ, conservativ)
+
+alldata %>% select(one_of(setdiff(names(alldata), names(commondata)))) %>% glimpse()
+
+alldata <- alldata %>%
+   mutate_at(
+      vars(narkosedauer,schnitt_naht_zeit,ponv_premed, tranquillizer_preop, analgesic_awr,
+           nausea_awr, antiemetics, rr_reduction_periop, atropin_periop, catecholamines_periop),
+      as.factor
+   ) %>% 
+   mutate_if(is.character, as.numeric) %>% 
+   mutate_all(~ ifelse(is.na(.), median(., na.rm = TRUE), .))
+# some brute imputation (median) to merge the operative and non-operative
+
+operativ %>% select(one_of(setdiff(names(operativ), names(commondata)))) %>% glimpse()
+
+operativ <- operativ %>% 
+   mutate_at(
+      vars(narkosedauer,schnitt_naht_zeit,ponv_premed, tranquillizer_preop, analgesic_awr,
+           nausea_awr, antiemetics, rr_reduction_periop, atropin_periop, catecholamines_periop),
+      as.factor
+   ) %>% 
+   mutate_if(is.character, as.numeric) %>% 
+   mutate_all(~ ifelse(is.na(.), median(., na.rm = TRUE), .))
+
+
+
 rm(list=ls(pattern="import"))
 
+delir <- list(alldata, commondata, conservativ, operativ)
+delir <- delir %>% map(~ .x %>% mutate_if(is.numeric, as.double))
 
-explore <- corr_RF(commondata, iter = 500)
+names(delir) <- c("alldata","commondata", "conservativ", "operativ")
 
-df <- explore
+write_rds(delir, path = here("input/delir.rds"), "xz", compression = 9L)
 
-df <- df %>% 
-   mutate(target = names(df)) %>% na_if(0) %>% 
-   pivot_longer(-target, names_to = "variable", values_to = "RFcorr") %>% 
-   mutate(ident = (target == variable)) %>% 
-   filter(ident == FALSE) %>% select(-ident) %>% 
-   na.omit() 
-
-df %>% mutate(bins = cut(RFcorr, breaks = seq(1, 0, by = -0.1))) %>% 
-   count(bins) %>% 
-   mutate(
-      bins = str_sub(bins, 2, -2) %>% str_replace_all(",", " - ") 
-   ) %>% 
-   arrange(desc(bins)) %>% 
-   mutate(proc = 100*n/sum(n)) %>% 
-   rename(feat_importance_range = bins, nr_of_correlations = n, procent = proc) %>% 
-   gt() %>% 
-      cols_align("center") %>% 
-      fmt_number(columns = vars(procent), decimals = 2)
-
-group_by(df, target) %>% summarise(sum_target = sum(RFcorr)) %>% rename(variable = target) %>% 
-   full_join(
-      group_by(df, variable) %>% summarise(sum_variable = sum(RFcorr)) 
-   ) %>% 
-   rowwise() %>% mutate(sum_RFimp  = sum(sum_target, sum_variable, na.rm = TRUE)) %>% ungroup() %>% 
-   select(-2,-3) %>% na.omit() %>% 
-   ggplot(aes(label = variable, size = sum_RFimp)) +
-   geom_text_wordcloud_area() +
-   scale_size_area(max_size = 8) +
-   theme_minimal()
-
-
-
-
-
-
+rm(alldata, commondata, conservativ, operativ)
