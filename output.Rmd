@@ -13,103 +13,49 @@ library(Boruta)
 library(furrr)
 library(here)
 
-delir <- read_rds(path = here("delir.rds"))
+delir <- read_rds(path = here("input/data.rds"))
+delirRF <- read_rds(path = here("input/delir.rds"))
 
 ```
 
-## We start by exploring the relations between data with permutated random forests
-```{r all the data is checked with boruta}
-# the "corr_RF" function must be loaded from the "functions_feat_selection.R"
+## The histogram of random forest scaled importance for crosscategorical items and those from same category
+```{r median of RF corr from all dataframes, make double pairs}
 
-corr_RF <- function(df, iter) {
-  set.seed(111)
-  require(Boruta)
-  require(dplyr)
-  require(furrr)
-  
-  plan(multiprocess)
-  
-  df <- stats::na.omit(df) %>% as_tibble() %>% ## remove zero variance columns
-        select(
-           -one_of(
-              summarise_all(df, list(~n_distinct(.))) %>%
-              pivot_longer(everything()) %>%
-              filter(value <= 1) %>% pull(name)
-            )
-         )
-  # use calibration1 and calibration2 to give a high value of correlation to scale upon 
-  df <- dplyr::mutate(df, calibration1 = 1:nrow(df), calibration2 = nrow(df):1)
-  # Boruta specific
-  df <- df %>% 
-    names() %>% 
-    future_map_dfr(
-      ~ attStats(
-        Boruta::Boruta(
-          formula(
-            paste0('`', ., '` ~ ', paste(names(df), collapse = " + "))
-          ),
-          data = df,
-          mcAdj = TRUE, doTrace = 0, holdHistory = TRUE, 
-          pValue = min(1/(nrow(df))^2 , 0.01),
-          maxRuns = iter
-        )
-      ) %>% 
-        rownames_to_column() %>% 
-        mutate(Score = ifelse(decision == "Rejected", 0, medianImp * normHits)) %>%
-        dplyr::select(rowname, Score) %>% 
-        pivot_wider(names_from = rowname, values_from = Score),
-      .progress = TRUE
-    ) %>%
-    # postprocessing 
-    as_tibble() %>% 
-    dplyr::mutate(target = colnames(df)) %>% 
-    pivot_longer(cols = -target, names_to = "feature") %>% 
-    dplyr::mutate(
-      value =  as.integer(100*value/max(value, na.rm = TRUE)), 
-      ident = case_when(
-        target == feature ~ "x",
-        target %in% c("calibration1","calibration2") ~ "x", # remove the calibration columns
-        feature %in% c("calibration1","calibration2") ~ "x",
-        TRUE ~ "v"
-      )
-    ) %>%
-    dplyr::filter(ident == "v", value > 5) %>% # the scaling is from 0-100, only RFimp > 5 is kept
-    dplyr::select(-ident) # remove the columns that are identical (feature == target)
-  
-  return(df)
-}
-
-i = 200
-RF <- list()
-RF$commondata <- delir$commondata %>% corr_RF(iter = i)
-RF$alldata <- delir$alldata %>% corr_RF(iter = i)
-RF$conservativ <- delir$conservativ %>% corr_RF(iter = i)
-RF$operativ <- delir$operativ %>% corr_RF(iter = i)
-rm(i)
-
-write_rds(RF, path = here("input/delir.rds"), "xz", compression = 9L)
-
-```
-
-```{r}
-
-delirRF <- readr::read_rds(path = here("delir.rds")) %>%
+suppressWarnings(
+delirRF <- read_rds(path = here("input/delir.rds")) %>% 
   map(~ .x %>% filter(target != "number", feature != "number")) %>% 
   reduce(bind_rows) %>% 
   mutate(
     pair = paste(pmin(target,feature), pmax(target,feature), sep = " ~ ")
   ) %>% 
   group_by(pair) %>%
-    summarise(value_mean = mean(value), value_max = max(value)) %>% 
+    summarise(value_mean = mean(value)) %>% 
   ungroup() %>% 
-  top_frac(0.5, wt = value_mean) %>% 
   arrange(desc(value_mean)) %>% 
-  separate(pair, c("nodeA", "nodeB"), sep = " ~ ", remove = TRUE)
+  separate(pair, c("nodeA", "nodeB"), sep = " ~ ", remove = TRUE) %>% 
+  separate(nodeA, c("nodeA_first", "nodeA1_rest"), extra = "merge", remove = FALSE) %>% 
+  separate(nodeB, c("nodeB_first", "nodeB_rest"), extra = "merge", remove = FALSE) %>% 
+  mutate(startA = str_sub(nodeA, end = 3L), startB = str_sub(nodeB, end = 3L)) %>% 
+  mutate(check1 = (nodeA_first == nodeB_first),
+         check2 = (nodeA_first == nodeB_first),
+         check3 = (startA == startB),
+         check = pmax(check1, check2, check3),
+         crosscateg = ifelse(check == 1, FALSE, TRUE)) %>% 
+  transmute(crosscateg, nodeA, nodeB, value_mean = as.integer(value_mean))
+)
+
+delirRF %>% ggplot(aes(x = value_mean, colour = crosscateg)) + geom_density(alpha = 0.1) + theme_minimal() +  scale_x_continuous(minor_breaks = seq(0, 60, 1))
 
 ```
+
+
+## An interactive table to search for secondary end-points
 
 ```{r}
+library(DT)
+
+delirRF %>% DT::datatable(filter = 'top',  
+          options = list(searchHighlight = TRUE, pageLength = 25 ))
 
 ```
-
 

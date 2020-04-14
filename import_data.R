@@ -165,6 +165,7 @@ delir <- delir %>% map(~ .x %>% mutate_if(is.numeric, as.double))
 
 names(delir) <- c("alldata","commondata", "conservativ", "operativ")
 
-write_rds(delir, path = here("input/delir.rds"), "xz", compression = 9L)
+write_rds(delir, path = here("input/data.rds"), "xz", compression = 9L)
 
 rm(alldata, commondata, conservativ, operativ)
+

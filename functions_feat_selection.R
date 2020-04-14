@@ -49,8 +49,17 @@ corr_RF <- function(df, iter) {
   
   plan(multiprocess)
   
-  df <- stats::na.omit(df) %>% as_tibble() 
+  df <- stats::na.omit(df) %>% as_tibble() %>% ## remove zero variance columns
+    select(
+      -one_of(
+        summarise_all(df, list(~n_distinct(.))) %>%
+          pivot_longer(everything()) %>%
+          filter(value <= 1) %>% pull(name)
+      )
+    )
+  # use calibration1 and calibration2 to give a high value of correlation to scale upon 
   df <- dplyr::mutate(df, calibration1 = 1:nrow(df), calibration2 = nrow(df):1)
+  # Boruta specific
   df <- df %>% 
     names() %>% 
     future_map_dfr(
@@ -71,6 +80,7 @@ corr_RF <- function(df, iter) {
         pivot_wider(names_from = rowname, values_from = Score),
       .progress = TRUE
     ) %>%
+    # postprocessing 
     as_tibble() %>% 
     dplyr::mutate(target = colnames(df)) %>% 
     pivot_longer(cols = -target, names_to = "feature") %>% 
@@ -78,16 +88,25 @@ corr_RF <- function(df, iter) {
       value =  as.integer(100*value/max(value, na.rm = TRUE)), 
       ident = case_when(
         target == feature ~ "x",
-        target %in% c("calibration1","calibration2") ~ "x",
+        target %in% c("calibration1","calibration2") ~ "x", # remove the calibration columns
         feature %in% c("calibration1","calibration2") ~ "x",
         TRUE ~ "v"
       )
     ) %>%
-    dplyr::filter(ident == "v", value > 5) %>%
-    dplyr::select(-ident)
+    dplyr::filter(ident == "v", value > 5) %>% # the scaling is from 0-100, only RFimp > 5 is kept
+    dplyr::select(-ident) # remove the columns that are identical (feature == target)
   
   return(df)
 }
+
+# i = 200
+# RF <- list()
+# RF$commondata <- delir$commondata %>% corr_RF(iter = i)
+# RF$alldata <- delir$alldata %>% corr_RF(iter = i)
+# RF$conservativ <- delir$conservativ %>% corr_RF(iter = i)
+# RF$operativ <- delir$operativ %>% corr_RF(iter = i)
+# rm(i)
+# write_rds(RF, path = here("input/delir.rds"), "xz", compression = 9L)
 
 screen_targets <- function(df, frac) {
   require(ggwordcloud)
