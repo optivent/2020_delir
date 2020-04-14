@@ -7,12 +7,12 @@ output: html_document
 
 ```{r setup and load the data, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
+library(here)
 knitr::opts_knit$set(root.dir = here("output"))
 
 library(tidyverse)
 library(Boruta)
 library(furrr)
-library(here)
 
 delir <- read_rds(path = here("input/data.rds"))
 delirRF <- read_rds(path = here("input/delir.rds"))
