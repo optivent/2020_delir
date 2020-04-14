@@ -13,7 +13,7 @@ library(Boruta)
 library(furrr)
 library(here)
 
-delir <- read_rds(path = here("input/delir.rds"))
+delir <- read_rds(path = here("delir.rds"))
 
 ```
 
@@ -92,16 +92,23 @@ write_rds(RF, path = here("input/delir.rds"), "xz", compression = 9L)
 ```
 
 ```{r}
-RF <- RF %>% map(~ .x %>% filter(target != "number", feature != "number"))
 
-test <-RF %>% map_dfr(~ .x %>% arrange(desc(value)) ) %>% 
-  group_by(target, feature) %>% summarise(value = mean(value)) %>% 
-  arrange(desc(value)) %>% mutate(
-  pair = paste(
-            pmin(target, feature), pmax(target,feature), sep = " - " 
-         )
-  )
-  
+delirRF <- readr::read_rds(path = here("delir.rds")) %>%
+  map(~ .x %>% filter(target != "number", feature != "number")) %>% 
+  reduce(bind_rows) %>% 
+  mutate(
+    pair = paste(pmin(target,feature), pmax(target,feature), sep = " ~ ")
+  ) %>% 
+  group_by(pair) %>%
+    summarise(value_mean = mean(value), value_max = max(value)) %>% 
+  ungroup() %>% 
+  top_frac(0.5, wt = value_mean) %>% 
+  arrange(desc(value_mean)) %>% 
+  separate(pair, c("nodeA", "nodeB"), sep = " ~ ", remove = TRUE)
+
+```
+
+```{r}
 
 ```
 
