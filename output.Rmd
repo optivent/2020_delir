@@ -2,13 +2,17 @@
 title: "Exploration Delir 2020"
 author: "AI Georgevici"
 date: "4/13/2020"
-output: html_document
+output: 
+  html_document: 
+    fig_height: 6
+    fig_width: 8
 ---
 
 ```{r setup and load the data, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 library(here)
-knitr::opts_knit$set(root.dir = here("output"))
+library(ezknitr)
+ezknit(file = "output.Rmd", out_dir = "reports", fig_dir = "myfigs")
 
 library(tidyverse)
 library(Boruta)
