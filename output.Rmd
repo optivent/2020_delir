@@ -8,11 +8,10 @@ output:
     fig_width: 8
 ---
 
-```{r setup and load the data, include=FALSE}
+
+```{r mini-setup and load data, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 library(here)
-library(ezknitr)
-ezknit(file = "output.Rmd", out_dir = "reports", fig_dir = "myfigs")
 
 library(tidyverse)
 library(Boruta)
@@ -21,22 +20,15 @@ library(furrr)
 delir <- read_rds(path = here("input/data.rds"))
 delirRF <- read_rds(path = here("input/delir.rds"))
 
+
 ```
 
 ## The histogram of random forest scaled importance for crosscategorical items and those from same category
 ```{r median of RF corr from all dataframes, make double pairs}
 
-suppressWarnings(
-delirRF <- read_rds(path = here("input/delir.rds")) %>% 
-  map(~ .x %>% filter(target != "number", feature != "number")) %>% 
-  reduce(bind_rows) %>% 
-  mutate(
-    pair = paste(pmin(target,feature), pmax(target,feature), sep = " ~ ")
-  ) %>% 
-  group_by(pair) %>%
-    summarise(value_mean = mean(value)) %>% 
-  ungroup() %>% 
-  arrange(desc(value_mean)) %>% 
+alldataRF <- delir$alldata %>% corr_RF(iter = 1500)
+
+alldataRF
   separate(pair, c("nodeA", "nodeB"), sep = " ~ ", remove = TRUE) %>% 
   separate(nodeA, c("nodeA_first", "nodeA1_rest"), extra = "merge", remove = FALSE) %>% 
   separate(nodeB, c("nodeB_first", "nodeB_rest"), extra = "merge", remove = FALSE) %>% 
@@ -47,11 +39,26 @@ delirRF <- read_rds(path = here("input/delir.rds")) %>%
          check = pmax(check1, check2, check3),
          crosscateg = ifelse(check == 1, FALSE, TRUE)) %>% 
   transmute(crosscateg, nodeA, nodeB, value_mean = as.integer(value_mean))
-)
+
 
 delirRF %>% ggplot(aes(x = value_mean, colour = crosscateg)) + geom_density(alpha = 0.1) + theme_minimal() +  scale_x_continuous(minor_breaks = seq(0, 60, 1))
 
 ```
+
+## Delirium as target-variable
+
+```{r}
+
+set.seed(111)
+boruta_alldata <- Boruta(delirium ~ . -number, data = delir$alldata, doTrace = 0, maxRuns = 10000) %>% 
+                  attStats() %>% rownames_to_column() %>% as_tibble() %>%
+                  filter(decision == "Confirmed") %>% arrange(desc(medianImp)) 
+library(gt)
+boruta_alldata %>% gt()
+
+```
+
+
 
 
 ## An interactive table to search for secondary end-points
@@ -63,4 +70,6 @@ delirRF %>% DT::datatable(filter = 'top',
           options = list(searchHighlight = TRUE, pageLength = 25 ))
 
 ```
+
+
 

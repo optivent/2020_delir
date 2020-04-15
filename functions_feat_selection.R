@@ -70,7 +70,7 @@ corr_RF <- function(df, iter) {
           ),
           data = df,
           mcAdj = TRUE, doTrace = 0, holdHistory = TRUE, 
-          pValue = min(1/(nrow(df))^2 , 0.01),
+          pValue = 0.01, # min(1/(nrow(df))^2 , 0.01)
           maxRuns = iter
         )
       ) %>% 
@@ -93,11 +93,27 @@ corr_RF <- function(df, iter) {
         TRUE ~ "v"
       )
     ) %>%
-    dplyr::filter(ident == "v", value > 5) %>% # the scaling is from 0-100, only RFimp > 5 is kept
-    dplyr::select(-ident) # remove the columns that are identical (feature == target)
-  
+    dplyr::filter(ident == "v") %>% # the scaling is from 0-100, only RFimp > 5 is kept
+    dplyr::select(-ident) %>%  # remove the columns that are identical (feature == target)
+    mutate(pair = paste(pmin(target,feature), pmax(target,feature), sep = " ~ ")) 
+
+    df <- dplyr::full_join(df,
+               group_by(df, pair) %>% 
+                 summarise(value_min = min(value),
+                  value_mean = mean(value),
+                  value_max = max(value)) %>% 
+                ungroup(),
+              by = "pair" 
+          ) %>% 
+      filter(value_max >0) %>% 
+      arrange(pair)
+      
   return(df)
 }
+
+alldataRF %>% 
+
+
 
 # i = 200
 # RF <- list()
