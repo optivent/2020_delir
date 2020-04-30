@@ -1,0 +1,61 @@
+---
+title: "Results_Delir_2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(stargazer)
+library(tidyverse)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r import, select, apply weights}
+library(readr)
+commondata <- read_csv("input/commondata.csv")
+
+selected <- commondata %>%
+   dplyr::select(delirium, age, matches("m3_|ospan_|calculated")) %>% 
+   dplyr::select(-matches("correct|false|avg|diff|trials|switch")) %>% 
+   dplyr::rename(
+      pre_M3_ie = m3_pre_ie, 
+      post_M3_ie = m3_post_ie,
+      pre_OSPAN_ie = ospan_ie_pre,
+      post_OSPAN_ie = ospan_ie_post,
+      pre_TRAIL_ie = vt_number_trail_ie_calculated_pre,
+      post_TRAIL_ie = vt_number_trail_ie_calculated_post
+      ) %>% 
+   mutate_if(is.numeric, as.integer) %>% 
+   mutate(count = ifelse(delirium == 1, 5, 1))
+
+```
+
+
+```{r log_reg}
+Delir_pre_scallogreg <- glm(delirium ~ age + pre_M3_ie + pre_OSPAN_ie + pre_TRAIL_ie,
+                        weights = count,
+                        family = binomial(link = "logit"),
+                         data = selected) 
+
+Delir_post_scallogreg <- glm(delirium ~ age + post_M3_ie + post_OSPAN_ie + post_TRAIL_ie,
+                        weights = count,
+                        family = binomial(link = "logit"),
+                        data = selected)
+
+stargazer::stargazer(Delir_pre_scallogreg, Delir_post_scallogreg,title = "Results", align = TRUE, type ="html")
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
