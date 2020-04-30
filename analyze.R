@@ -69,7 +69,7 @@ Boruta_results <- Boruta(delirium ~ . ,
 
 Boruta_results %>% filter(str_detect(rowname, 'pre'), meanImp > 3) %>% pull(rowname) %>% paste0(collapse =  " + " ) 
 
-scaled_data <- commondata %>%
+weighted_data <- commondata %>%
    dplyr::rename(
       pre_M3_ie = m3_pre_ie, 
       post_M3_ie = m3_post_ie,
@@ -81,23 +81,21 @@ scaled_data <- commondata %>%
    mutate_if(is.numeric, as.integer) %>% 
    mutate(count = ifelse(delirium == 1, 6, 1), delirium = as.integer(as.character(delirium))) %>% 
    select_if(is.numeric) %>% 
-   mutate(delirium = as.factor(delirium)) %>% 
-   mutate_at(vars(-c(delirium, count)), scale2)
+   mutate(delirium = as.factor(delirium)) 
 
-pre_data <- scaled_data %>% 
-   select(count, delirium, age,
-          vt_color_pre_ie , vt_number_rt_lb_last_yes_pre , vt_switch_rt_lb13_yes_pre , pre_OSPAN_ie , vt_switch_trail_ie_calculated_pre , m3_false_pre)
+pre_data <- weighted_data  %>% 
+   dplyr::select(count, delirium, age,
+          vt_color_pre_ie , pre_OSPAN_ie , m3_false_pre) %>% 
+   mutate_at(vars(-c(delirium,count)), log2) %>% 
+   mutate_if(is.numeric, function(x) ifelse(is.infinite(x), 0, x))
 
-Delir_pre_scallogreg <- glm(delirium ~ age + 
-                               vt_color_pre_ie + 
-                               vt_number_rt_lb_last_yes_pre + 
-                               vt_switch_rt_lb13_yes_pre +
-                               pre_OSPAN_ie +
-                               vt_switch_trail_ie_calculated_pre +
-                               m3_false_pre,
+Delir_pre_scallogreg <- glm(delirium ~ age + vt_color_pre_ie + pre_OSPAN_ie + m3_false_pre,
                             weights = count,
                             family = binomial(link = "logit"),
-                            data = scaled_data) 
+                            data = pre_data) 
+
+Delir_pre_scallogreg %>% broom::tidy() %>% slice(-1) %>% mutate(estimate = exp(estimate))
+
 
 
 library(MASS)
